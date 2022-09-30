@@ -6,7 +6,7 @@ const buildBussinessLogicStream = (expInput, valInput) => {
   fromEvent(expInput, "change")
     .map(evt => evt.target.value)
     .map(CellParser.parse)
-    .map(readParams)
+    .flatMap(valObj => readParams(valObj, expInput))
     .flatMap(calculate)
     .onValue(val => displayValue(val, valInput));
 }
@@ -36,17 +36,24 @@ const buildEnterExitStreams = (cell, expInput, valInput) => {
     });
 }
 
-const readParams = (valObj) => {
+const readParams = (valObj, expInput) => {
   if (valObj.isNumber()) {
     return { type: 0, value: valObj.value };
   } else if (valObj.isReference()) {
-    const val = document.getElementById(valObj.value).value;
+    const input = document.getElementById(valObj.value);
 
-    return { type: 1, value: Number(val) };
+    fromEvent(input, 'update')
+      .map(e => e.target.value)
+      .diff("", (prevVal, currVal) => prevVal != currVal)
+      .onValue(() => {
+        expInput.dispatchEvent(new Event('change'));
+      });
+    
+    return { type: 1, value: Number(input.value) };
   } else if (valObj.isOperation()) {
     const { operation, params } = valObj.value;
 
-    return { type: 2, value: { operation: operation, params: params.map(val => readParams(val)) } };
+    return { type: 2, value: { operation: operation, params: params.map(val => readParams(val, expInput)) } };
   } else if (valObj.isError()) {
     return { type: 3, value: valObj.value };
   }
@@ -81,4 +88,6 @@ const displayValue = (expValue, valInput) => {
   } else {
     valInput.value = result;
   }
+
+  valInput.dispatchEvent(new Event('update'));
 }
