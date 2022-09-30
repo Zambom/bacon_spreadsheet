@@ -1,16 +1,14 @@
-const { fromEvent, Error: BaconError, combineAsArray, fromPromise, once, mergeAll } = Bacon;
+const { fromEvent, Error: BaconError, combineAsArray, fromPromise, fromCallback, once, mergeAll } = Bacon;
 const URL = "";
 
 /* lógica principal */
 const buildBussinessLogicStream = (expInput, valInput) => {
   fromEvent(expInput, "change")
     .map(evt => evt.target.value)
+    .map(CellParser.parse)
+    .map(readParams)
     .flatMap(calculate)
-    .map(response => response.json())
-    .onValue(val => {
-      console.log(val);
-      displayValue(val, valInput);
-  });
+    .onValue(val => displayValue(val, valInput));
 }
 
 const buildEnterExitStreams = (cell, expInput, valInput) => {
@@ -38,16 +36,49 @@ const buildEnterExitStreams = (cell, expInput, valInput) => {
     });
 }
 
-const calculate = (value) => {
-  const valObj = CellParser.parse(value);
+const readParams = (valObj) => {
+  if (valObj.isNumber()) {
+    return { type: 0, value: valObj.value };
+  } else if (valObj.isReference()) {
+    const val = document.getElementById(valObj.value).value;
 
-  return fromPromise(fetch('http://localhost:3001/add', {
-    method: 'POST',
-    mode: 'cors',
-    body: { json: JSON.stringify(1) }
-  }));
+    return { type: 1, value: Number(val) };
+  } else if (valObj.isOperation()) {
+    const { operation, params } = valObj.value;
+
+    return { type: 2, value: { operation: operation, params: params.map(val => readParams(val)) } };
+  } else if (valObj.isError()) {
+    return { type: 3, value: valObj.value };
+  }
+}
+
+const calculate = (valObj) => {
+  const { type, value } = valObj;
+  
+  if (type === 2) {
+    const { operation, params } = value;
+
+    return fromPromise(fetch(`http://localhost:3001/${operation.toLowerCase()}`, {
+      method: 'POST',
+      mode: 'cors',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ params })
+    }).then(response => response.json()));
+  } else if (type === 3) {
+    return once({ result: 'error' });
+  } else {
+    return once({ result: value });
+  }
 }
 
 const displayValue = (expValue, valInput) => {
-  valInput.value = expValue.result;
+  const { result } = expValue;
+
+  if (result === 'error') {
+    valInput.value = "#ERROR";
+  } else {
+    valInput.value = result;
+  }
 }
